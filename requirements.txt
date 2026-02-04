@@ -1,0 +1,7 @@
+streamlit
+audio-separator==0.41.1
+onnxruntime
+numpy<2
+soundfile
+pydub
+tqdm
