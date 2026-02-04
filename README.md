@@ -146,5 +146,3 @@ Model licenses belong to their respective authors.
 * UVR / MDX community
 * audio-separator contributors
 * Open-source audio ML ecosystem
-
-```
