@@ -4,3 +4,4 @@ onnxruntime==1.23.2
 soundfile
 pydub
 tqdm
+yt-dlp

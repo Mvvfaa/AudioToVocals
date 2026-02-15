@@ -1,7 +1,6 @@
 import streamlit as st
 import subprocess
 import uuid
-import os
 from pathlib import Path
 
 # ---------------- CONFIG ----------------
@@ -35,12 +34,47 @@ def run_with_logs(cmd, log_box):
     process.wait()
     if process.returncode != 0:
         raise RuntimeError("Processing failed")
-    
+
+
 def find_stem(folder, keyword):
     files = list(folder.glob(f"*{keyword}*"))
-    if not files:
-        return None
-    return files[0]
+    return files[0] if files else None
+
+
+def download_from_youtube(url: str, out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{uuid.uuid4().hex}.mp3"
+
+    cmd = [
+        "yt-dlp",
+        "-x",
+        "--audio-format", "mp3",
+        "--audio-quality", "0",
+        "-o", str(out_file),
+        url
+    ]
+
+    subprocess.run(cmd, check=True)
+    return out_file
+
+
+def spotify_to_ytsearch(url: str) -> str:
+    # yt-dlp can auto-search YouTube
+    return f"ytsearch1:{url}"
+
+
+def get_cached_download(link: str, out_dir: Path) -> Path:
+    normalized = link.strip()
+    cached_link = st.session_state.get("cached_link")
+    cached_path = st.session_state.get("cached_audio_path")
+
+    if cached_link == normalized and cached_path and Path(cached_path).exists():
+        return Path(cached_path)
+
+    audio_file = download_from_youtube(normalized, out_dir)
+    st.session_state["cached_link"] = normalized
+    st.session_state["cached_audio_path"] = str(audio_file)
+    return audio_file
 
 
 # ---------------- HEADER ----------------
@@ -65,18 +99,50 @@ with left:
 
 with right:
     st.subheader("Listen to an example")
-
     st.audio("examples/original.mp3", format="audio/mp3")
     st.audio("examples/vocals.mp3", format="audio/mp3")
     st.caption("Original song (top) vs Extracted vocals (bottom)")
 
-# ---------------- UPLOAD ----------------
+# ---------------- INPUT ----------------
 st.divider()
-st.subheader("Upload your song")
+st.subheader("Choose input")
 
-uploaded = st.file_uploader(
-    "MP3 or WAV file",
-    type=["mp3", "wav"]
+input_mode = st.radio(
+    "",
+    ["Upload audio file", "Paste YouTube link"],
+    horizontal=True
+)
+
+audio_path = None
+
+if input_mode == "Upload audio file":
+    uploaded = st.file_uploader(
+        "MP3 or WAV file",
+        type=["mp3", "wav"]
+    )
+
+    if uploaded:
+        audio_path = TEMP_DIR / f"{uuid.uuid4().hex}_{uploaded.name}"
+        audio_path.write_bytes(uploaded.read())
+
+else:
+    link = st.text_input("Paste YouTube link")
+
+    if link:
+        with st.spinner("Downloading audio…"):
+            try:
+                audio_path = get_cached_download(link, TEMP_DIR)
+                st.success("Audio ready!")
+            except Exception as e:
+                st.error(f"Download failed: {e}")
+                st.stop()
+
+if audio_path is None:
+    st.stop()
+
+st.info(
+    "⏱ Uploading MP3 is fastest. "
+    "Link downloads may take up to 1 minute."
 )
 
 # ---------------- PRESETS ----------------
@@ -107,20 +173,16 @@ else:
     MAIN = {"seg": 1024, "overlap": 0.9}
     HQ = {"seg": 512, "overlap": 0.5}
 
-st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
+st.caption(f"Estimated processing time: **{ETA}**")
 
 # ---------------- PROCESS ----------------
 st.divider()
 
-if uploaded and st.button("🎧 Extract Vocals"):
+if st.button("🎧 Extract Vocals"):
     job_id = uuid.uuid4().hex[:8]
 
-    input_path = TEMP_DIR / f"{job_id}_{uploaded.name}"
     step1_dir = TEMP_DIR / f"step1_{job_id}"
     step2_dir = TEMP_DIR / f"step2_{job_id}"
-
-    with open(input_path, "wb") as f:
-        f.write(uploaded.read())
 
     # ---------- STEP 1 ----------
     st.subheader("Step 1 — Extracting vocals")
@@ -133,19 +195,18 @@ if uploaded and st.button("🎧 Extract Vocals"):
         "--mdx_overlap", str(MAIN["overlap"]),
         "--output_format", "MP3",
         "--output_dir", str(step1_dir),
-        str(input_path)
+        str(audio_path)
     ]
 
     with st.spinner("Running MDX Main…"):
         run_with_logs(cmd_step1, log1)
-
-    st.success("Step 1 complete")
 
     vocals_path = find_stem(step1_dir, "Vocals")
     if vocals_path is None:
         st.error("Vocals file not found.")
         st.stop()
 
+    st.success("Step 1 complete")
 
     # ---------- STEP 2 ----------
     st.subheader("Step 2 — Cleaning vocals")
@@ -168,7 +229,6 @@ if uploaded and st.button("🎧 Extract Vocals"):
     st.success("🎉 Final vocals ready!")
 
     # ---------- OUTPUT ----------
-    st.subheader("Your extracted vocals")
     final_vocals = find_stem(step2_dir, "Vocals")
     if final_vocals is None:
         st.error("Final vocals file not found.")
