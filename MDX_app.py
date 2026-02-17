@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 cookies_txt = st.secrets.get("YTDLP_COOKIES_TXT", "").strip()
-if cookies_txt:
+if cookies_txt and "youtube.com" in cookies_txt:
     cookies_path = Path(tempfile.gettempdir()) / "yt_cookies.txt"
     cookies_path.write_text(cookies_txt, encoding="utf-8")
     os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
@@ -67,19 +67,18 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
 
     attempts = [
         common + [
-            "--extractor-args", "youtube:player_client=web,web_safari,tv",
+            "--extractor-args", "youtube:player_client=web,web_safari,tv;player_skip=js",
             "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "--force-ipv4",
             "--user-agent", "Mozilla/5.0",
             source,
         ],
         common + [
-            "--extractor-args", "youtube:player_client=web,tv",
+            "--extractor-args", "youtube:player_client=web,tv;player_skip=js",
             "--format", "bestaudio/best",
             "--force-ipv4",
             source,
         ],
-        common + [source],
     ]
 
     if cookie_file and Path(cookie_file).exists():
@@ -87,7 +86,7 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
             0,
             common + [
                 "--cookies", cookie_file,
-                "--extractor-args", "youtube:player_client=web",
+                "--extractor-args", "youtube:player_client=web;player_skip=js",
                 "--format", "bestaudio/best",
                 source,
             ],
@@ -108,7 +107,7 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
     raise RuntimeError(
         "yt-dlp could not download this link. "
         "The video is likely protected by YouTube anti-bot/PO token checks in this environment. "
-        "If this is your deployment, set YTDLP_COOKIES_FILE to a valid Netscape cookies file path. "
+        "On Streamlit Cloud, add a YTDLP_COOKIES_TXT secret containing YouTube cookies.txt content. "
         "Please try another link or upload MP3/WAV directly.\n\n"
         f"yt-dlp output:\n{last_output[-2000:]}"
     )
@@ -186,6 +185,9 @@ if input_mode == "Upload audio file":
 
 else:
     link = st.text_input("Paste YouTube link")
+
+    if not os.getenv("YTDLP_COOKIES_FILE", "").strip():
+        st.caption("Tip: Set Streamlit secret YTDLP_COOKIES_TXT for protected YouTube videos.")
 
     if link:
         with st.spinner("Downloading audio…"):
