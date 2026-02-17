@@ -2,8 +2,14 @@ import streamlit as st
 import subprocess
 import uuid
 import os
+import tempfile
 from pathlib import Path
 
+cookies_txt = st.secrets.get("YTDLP_COOKIES_TXT", "").strip()
+if cookies_txt:
+    cookies_path = Path(tempfile.gettempdir()) / "yt_cookies.txt"
+    cookies_path.write_text(cookies_txt, encoding="utf-8")
+    os.environ["YTDLP_COOKIES_FILE"] = str(cookies_path)
 
 # ---------------- CONFIG ----------------
 st.set_page_config(
