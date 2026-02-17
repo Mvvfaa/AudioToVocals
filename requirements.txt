@@ -5,3 +5,5 @@ soundfile
 pydub
 tqdm
 yt-dlp
+omegaconf>=2.3.0
+julius>=0.2.7
