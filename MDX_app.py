@@ -2,7 +2,6 @@ import streamlit as st
 import subprocess
 import uuid
 import os
-import tempfile
 from pathlib import Path
 
 cookies_txt = st.secrets.get("YTDLP_COOKIES_TXT", "").strip()
@@ -42,96 +41,12 @@ def run_with_logs(cmd, log_box):
     process.wait()
     if process.returncode != 0:
         raise RuntimeError("Processing failed")
-
-
+    
 def find_stem(folder, keyword):
     files = list(folder.glob(f"*{keyword}*"))
-    return files[0] if files else None
-
-
-def download_from_youtube(url: str, out_dir: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{uuid.uuid4().hex}.mp3"
-
-    source = spotify_to_ytsearch(url) if "open.spotify.com" in url else url
-    cookie_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
-
-    common = [
-        "yt-dlp",
-        "--no-playlist",
-        "--extract-audio",
-        "--audio-format", "mp3",
-        "--audio-quality", "0",
-        "--output", str(out_file),
-    ]
-
-    attempts = [
-        common + [
-            "--extractor-args", "youtube:player_client=web,web_safari,tv;player_skip=js",
-            "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
-            "--force-ipv4",
-            "--user-agent", "Mozilla/5.0",
-            source,
-        ],
-        common + [
-            "--extractor-args", "youtube:player_client=web,tv;player_skip=js",
-            "--format", "bestaudio/best",
-            "--force-ipv4",
-            source,
-        ],
-    ]
-
-    if cookie_file and Path(cookie_file).exists():
-        attempts.insert(
-            0,
-            common + [
-                "--cookies", cookie_file,
-                "--extractor-args", "youtube:player_client=web;player_skip=js",
-                "--format", "bestaudio/best",
-                source,
-            ],
-        )
-
-    last_output = ""
-    for cmd in attempts:
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        if proc.returncode == 0 and out_file.exists():
-            return out_file
-        last_output = proc.stdout or ""
-
-    raise RuntimeError(
-        "yt-dlp could not download this link. "
-        "The video is likely protected by YouTube anti-bot/PO token checks in this environment. "
-        "On Streamlit Cloud, add a YTDLP_COOKIES_TXT secret containing YouTube cookies.txt content. "
-        "Please try another link or upload MP3/WAV directly.\n\n"
-        f"yt-dlp output:\n{last_output[-2000:]}"
-    )
-
-    return out_file
-
-
-def spotify_to_ytsearch(url: str) -> str:
-    # yt-dlp can auto-search YouTube
-    return f"ytsearch1:{url}"
-
-
-def get_cached_download(link: str, out_dir: Path) -> Path:
-    normalized = link.strip()
-    cached_link = st.session_state.get("cached_link")
-    cached_path = st.session_state.get("cached_audio_path")
-
-    if cached_link == normalized and cached_path and Path(cached_path).exists():
-        return Path(cached_path)
-
-    audio_file = download_from_youtube(normalized, out_dir)
-    st.session_state["cached_link"] = normalized
-    st.session_state["cached_audio_path"] = str(audio_file)
-    return audio_file
+    if not files:
+        return None
+    return files[0]
 
 
 # ---------------- HEADER ----------------
@@ -156,54 +71,18 @@ with left:
 
 with right:
     st.subheader("Listen to an example")
+
     st.audio("examples/original.mp3", format="audio/mp3")
     st.audio("examples/vocals.mp3", format="audio/mp3")
     st.caption("Original song (top) vs Extracted vocals (bottom)")
 
-# ---------------- INPUT ----------------
+# ---------------- UPLOAD ----------------
 st.divider()
-st.subheader("Choose input")
+st.subheader("Upload your song")
 
-input_mode = st.radio(
-    "Input source",
-    ["Upload audio file", "Paste YouTube link"],
-    horizontal=True,
-    label_visibility="collapsed"
-)
-
-audio_path = None
-
-if input_mode == "Upload audio file":
-    uploaded = st.file_uploader(
-        "MP3 or WAV file",
-        type=["mp3", "wav"]
-    )
-
-    if uploaded:
-        audio_path = TEMP_DIR / f"{uuid.uuid4().hex}_{uploaded.name}"
-        audio_path.write_bytes(uploaded.read())
-
-else:
-    link = st.text_input("Paste YouTube link")
-
-    if not os.getenv("YTDLP_COOKIES_FILE", "").strip():
-        st.caption("Tip: Set Streamlit secret YTDLP_COOKIES_TXT for protected YouTube videos.")
-
-    if link:
-        with st.spinner("Downloading audio…"):
-            try:
-                audio_path = get_cached_download(link, TEMP_DIR)
-                st.success("Audio ready!")
-            except Exception as e:
-                st.error(f"Download failed: {e}")
-                st.stop()
-
-if audio_path is None:
-    st.stop()
-
-st.info(
-    "⏱ Uploading MP3 is fastest. "
-    "Link downloads may take up to 1 minute."
+uploaded = st.file_uploader(
+    "MP3 or WAV file",
+    type=["mp3", "wav"]
 )
 
 # ---------------- PRESETS ----------------
@@ -235,16 +114,20 @@ else:
     MAIN = {"seg": 1024, "overlap": 0.9}
     HQ = {"seg": 512, "overlap": 0.5}
 
-st.caption(f"Estimated processing time: **{ETA}**")
+st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
 # ---------------- PROCESS ----------------
 st.divider()
 
-if st.button("🎧 Extract Vocals"):
+if uploaded and st.button("🎧 Extract Vocals"):
     job_id = uuid.uuid4().hex[:8]
 
+    input_path = TEMP_DIR / f"{job_id}_{uploaded.name}"
     step1_dir = TEMP_DIR / f"step1_{job_id}"
     step2_dir = TEMP_DIR / f"step2_{job_id}"
+
+    with open(input_path, "wb") as f:
+        f.write(uploaded.read())
 
     # ---------- STEP 1 ----------
     st.subheader("Step 1 — Extracting vocals")
@@ -257,18 +140,19 @@ if st.button("🎧 Extract Vocals"):
         "--mdx_overlap", str(MAIN["overlap"]),
         "--output_format", "MP3",
         "--output_dir", str(step1_dir),
-        str(audio_path)
+        str(input_path)
     ]
 
     with st.spinner("Running MDX Main…"):
         run_with_logs(cmd_step1, log1)
+
+    st.success("Step 1 complete")
 
     vocals_path = find_stem(step1_dir, "Vocals")
     if vocals_path is None:
         st.error("Vocals file not found.")
         st.stop()
 
-    st.success("Step 1 complete")
 
     # ---------- STEP 2 ----------
     st.subheader("Step 2 — Cleaning vocals")
@@ -291,6 +175,7 @@ if st.button("🎧 Extract Vocals"):
     st.success("🎉 Final vocals ready!")
 
     # ---------- OUTPUT ----------
+    st.subheader("Your extracted vocals")
     final_vocals = find_stem(step2_dir, "Vocals")
     if final_vocals is None:
         st.error("Final vocals file not found.")
