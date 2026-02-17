@@ -3,6 +3,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+
 # ---------------- CONFIG ----------------
 st.set_page_config(
     page_title="Vocal Separator",
@@ -45,16 +46,52 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{uuid.uuid4().hex}.mp3"
 
-    cmd = [
+    source = spotify_to_ytsearch(url) if "open.spotify.com" in url else url
+
+    common = [
         "yt-dlp",
-        "-x",
+        "--no-playlist",
+        "--extract-audio",
         "--audio-format", "mp3",
         "--audio-quality", "0",
-        "-o", str(out_file),
-        url
+        "--output", str(out_file),
     ]
 
-    subprocess.run(cmd, check=True)
+    attempts = [
+        common + [source],
+        common + [
+            "--extractor-args", "youtube:player_client=android,web",
+            "--force-ipv4",
+            "--user-agent", "Mozilla/5.0",
+            source,
+        ],
+        common + [
+            "--extractor-args", "youtube:player_client=android",
+            "--format", "bestaudio[ext=webm]/bestaudio/best",
+            "--force-ipv4",
+            source,
+        ],
+    ]
+
+    last_output = ""
+    for cmd in attempts:
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.returncode == 0 and out_file.exists():
+            return out_file
+        last_output = proc.stdout or ""
+
+    raise RuntimeError(
+        "yt-dlp could not download this link. "
+        "The video may be blocked in this environment or require cookies/login. "
+        "Please try another link or upload MP3/WAV directly.\n\n"
+        f"yt-dlp output:\n{last_output[-2000:]}"
+    )
+
     return out_file
 
 
@@ -108,9 +145,10 @@ st.divider()
 st.subheader("Choose input")
 
 input_mode = st.radio(
-    "",
+    "Input source",
     ["Upload audio file", "Paste YouTube link"],
-    horizontal=True
+    horizontal=True,
+    label_visibility="collapsed"
 )
 
 audio_path = None
@@ -150,9 +188,10 @@ st.divider()
 st.subheader("Choose a preset")
 
 preset = st.radio(
-    "",
+    "Preset",
     ["Normal", "Heavy instrumental", "Noisy / live"],
-    horizontal=True
+    horizontal=True,
+    label_visibility="collapsed"
 )
 
 if preset == "Normal":
