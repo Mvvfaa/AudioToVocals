@@ -1,6 +1,7 @@
 import streamlit as st
 import subprocess
 import uuid
+import os
 from pathlib import Path
 
 
@@ -47,6 +48,7 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
     out_file = out_dir / f"{uuid.uuid4().hex}.mp3"
 
     source = spotify_to_ytsearch(url) if "open.spotify.com" in url else url
+    cookie_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
 
     common = [
         "yt-dlp",
@@ -58,20 +60,32 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
     ]
 
     attempts = [
-        common + [source],
         common + [
-            "--extractor-args", "youtube:player_client=android,web",
+            "--extractor-args", "youtube:player_client=web,web_safari,tv",
+            "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "--force-ipv4",
             "--user-agent", "Mozilla/5.0",
             source,
         ],
         common + [
-            "--extractor-args", "youtube:player_client=android",
-            "--format", "bestaudio[ext=webm]/bestaudio/best",
+            "--extractor-args", "youtube:player_client=web,tv",
+            "--format", "bestaudio/best",
             "--force-ipv4",
             source,
         ],
+        common + [source],
     ]
+
+    if cookie_file and Path(cookie_file).exists():
+        attempts.insert(
+            0,
+            common + [
+                "--cookies", cookie_file,
+                "--extractor-args", "youtube:player_client=web",
+                "--format", "bestaudio/best",
+                source,
+            ],
+        )
 
     last_output = ""
     for cmd in attempts:
@@ -87,7 +101,8 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
 
     raise RuntimeError(
         "yt-dlp could not download this link. "
-        "The video may be blocked in this environment or require cookies/login. "
+        "The video is likely protected by YouTube anti-bot/PO token checks in this environment. "
+        "If this is your deployment, set YTDLP_COOKIES_FILE to a valid Netscape cookies file path. "
         "Please try another link or upload MP3/WAV directly.\n\n"
         f"yt-dlp output:\n{last_output[-2000:]}"
     )
