@@ -84,9 +84,10 @@ st.divider()
 st.subheader("Choose a preset")
 
 preset = st.radio(
-    "",
+    "Preset",
     ["Normal", "Heavy instrumental", "Noisy / live"],
-    horizontal=True
+    horizontal=True,
+    label_visibility="collapsed"
 )
 
 if preset == "Normal":
