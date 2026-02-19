@@ -17,33 +17,33 @@ TEMP_DIR.mkdir(exist_ok=True)
 # Streamlit Cloud timeout: 2 hours
 PROCESS_TIMEOUT = 7200
 
+# Store logs in session state to avoid widget re-renders
+if 'current_logs' not in st.session_state:
+    st.session_state.current_logs = {}
+
 # ---------------- HELPERS ----------------
-def run_with_logs(cmd, log_box):
-    """Run subprocess with periodic log updates (every 5 lines for efficiency)"""
+def run_with_logs(cmd, log_box, job_id):
+    """Run subprocess and collect logs without updating UI in loop (prevents crashes)"""
     try:
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1
         )
 
-        logs = ""
-        line_count = 0
-        for line in process.stdout:
-            logs += line
-            line_count += 1
-            # Update UI every 5 lines instead of every line (reduces lag)
-            if line_count % 5 == 0:
-                log_box.text_area(
-                    "Processing log",
-                    logs,
-                    height=300,
-                    disabled=True
-                )
-
-        # Final update
+        # Collect all output first, then update UI once
+        stdout, stderr = process.communicate(timeout=PROCESS_TIMEOUT)
+        
+        logs = stdout if stdout else ""
+        if stderr:
+            logs += f"\n[STDERR]\n{stderr}"
+        
+        # Store in session state instead of re-rendering
+        st.session_state.current_logs[job_id] = logs
+        
+        # Single UI update at the end
         log_box.text_area(
             "Processing log",
             logs,
@@ -51,16 +51,12 @@ def run_with_logs(cmd, log_box):
             disabled=True
         )
 
-        # Wait with timeout
-        try:
-            process.wait(timeout=PROCESS_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raise RuntimeError(f"Processing timed out after {PROCESS_TIMEOUT} seconds")
-
         if process.returncode != 0:
-            raise RuntimeError(f"Processing failed with exit code {process.returncode}")
+            raise RuntimeError(f"Processing failed with exit code {process.returncode}\n\n{logs}")
             
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise RuntimeError(f"Processing timed out after {PROCESS_TIMEOUT} seconds")
     except Exception as e:
         raise RuntimeError(f"Error during processing: {str(e)}")
     
@@ -167,7 +163,7 @@ if uploaded and st.button("🎧 Extract Vocals"):
         ]
 
         with st.spinner("Running MDX Main…"):
-            run_with_logs(cmd_step1, log1)
+            run_with_logs(cmd_step1, log1, job_id)
 
         st.success("Step 1 complete")
 
@@ -192,7 +188,7 @@ if uploaded and st.button("🎧 Extract Vocals"):
         ]
 
         with st.spinner("Refining vocals…"):
-            run_with_logs(cmd_step2, log2)
+            run_with_logs(cmd_step2, log2, job_id)
 
         st.success("🎉 Final vocals ready!")
 
