@@ -17,13 +17,23 @@ TEMP_DIR.mkdir(exist_ok=True)
 # Streamlit Cloud timeout: 2 hours
 PROCESS_TIMEOUT = 7200
 
-# Store logs in session state to avoid widget re-renders
-if 'current_logs' not in st.session_state:
-    st.session_state.current_logs = {}
+# Max audio file size: 150MB to prevent crashes
+MAX_FILE_SIZE = 150 * 1024 * 1024  # 150MB
+
+# Store only critical info in session (not full logs to save memory)
+if 'processing_status' not in st.session_state:
+    st.session_state.processing_status = {}
 
 # ---------------- HELPERS ----------------
+def check_file_size(uploaded_file):
+    """Validate audio file size to prevent memory issues"""
+    if uploaded_file.size > MAX_FILE_SIZE:
+        size_mb = uploaded_file.size / (1024 * 1024)
+        max_mb = MAX_FILE_SIZE / (1024 * 1024)
+        raise ValueError(f"File too large: {size_mb:.1f}MB. Maximum: {max_mb:.0f}MB")
+
 def run_with_logs(cmd, status_container, job_id):
-    """Run subprocess and stream logs to status container without triggering reruns"""
+    """Run subprocess with minimal memory usage"""
     try:
         process = subprocess.Popen(
             cmd,
@@ -33,41 +43,29 @@ def run_with_logs(cmd, status_container, job_id):
             bufsize=1
         )
 
-        logs = ""
         line_count = 0
         
-        # Read stdout line by line
+        # Read stdout line by line WITHOUT storing in memory
         while True:
             line = process.stdout.readline()
             if not line:
                 break
-            logs += line
             line_count += 1
             
-            # Update status every 20 lines
-            if line_count % 20 == 0:
-                # Update the last status message
-                status_container.write(f"⏳ Processing... ({line_count} lines executed)")
+            # Update status container every 50 lines
+            if line_count % 50 == 0:
+                status_container.write(f"⏳ Processing... ({line_count} lines)")
         
         # Wait for process to finish
         returncode = process.wait(timeout=PROCESS_TIMEOUT)
         
-        # Get any remaining stderr
-        stderr = process.stderr.read() if process.stderr else ""
-        if stderr:
-            logs += f"\n[STDERR]\n{stderr}"
-        
-        # Store in session state
-        st.session_state.current_logs[job_id] = logs
-        
         # Show completion info
         if returncode == 0:
-            status_container.write(f"✅ Step completed! ({line_count} lines processed)")
+            status_container.success(f"✅ Complete! ({line_count} lines processed)")
         else:
-            status_container.write(f"❌ Failed with exit code {returncode}")
-            raise RuntimeError(f"Processing failed with exit code {returncode}\n\nLogs:\n{logs}")
+            raise RuntimeError(f"Processing failed with exit code {returncode}")
         
-        return logs
+        return line_count
             
     except subprocess.TimeoutExpired:
         process.kill()
@@ -124,9 +122,18 @@ st.divider()
 st.subheader("Upload your song")
 
 uploaded = st.file_uploader(
-    "MP3 or WAV file",
+    "MP3 or WAV file (Max 150MB)",
     type=["mp3", "wav"]
 )
+
+# Validate file size immediately
+if uploaded:
+    try:
+        check_file_size(uploaded)
+        st.success(f"✅ File size OK ({uploaded.size / (1024*1024):.1f}MB)")
+    except ValueError as e:
+        st.error(f"❌ {e}")
+        uploaded = None
 
 # ---------------- PRESETS ----------------
 st.divider()
@@ -148,14 +155,14 @@ if preset == "Normal":
 elif preset == "Heavy instrumental":
     st.warning("⏳ Slower — Strong music removal")
     ETA = "≈ 16 minutes"
-    MAIN = {"seg": 768, "overlap": 0.75}
-    HQ = {"seg": 256, "overlap": 0.4}
+    MAIN = {"seg": 640, "overlap": 0.6}
+    HQ = {"seg": 256, "overlap": 0.3}
 
 else:
     st.error("🐢 Very Slow — Best for noisy recordings")
     ETA = "≈ 26 minutes"
-    MAIN = {"seg": 1024, "overlap": 0.9}
-    HQ = {"seg": 512, "overlap": 0.5}
+    MAIN = {"seg": 768, "overlap": 0.7}
+    HQ = {"seg": 256, "overlap": 0.35}
 
 st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
@@ -176,7 +183,7 @@ if uploaded and st.button("🎧 Extract Vocals"):
         # ---------- STEP 1 ----------
         st.subheader("Step 1 — Extracting vocals")
         
-        with st.status("Running MDX Main…", expanded=True) as status1:
+        with st.status("Running MDX Main…", expanded=False) as status1:
             cmd_step1 = [
                 "audio-separator",
                 "-m", "UVR_MDXNET_Main.onnx",
@@ -194,10 +201,14 @@ if uploaded and st.button("🎧 Extract Vocals"):
             st.error("❌ Vocals file not found after Step 1. Please try again with a different audio file.")
             st.stop()
 
+        # Clean up Step 1 folder to save disk space BEFORE Step 2 starts
+        st.info("🧹 Cleaning up Step 1 files...")
+        shutil.rmtree(step1_dir, ignore_errors=True)
+
         # ---------- STEP 2 ----------
         st.subheader("Step 2 — Cleaning vocals")
         
-        with st.status("Refining vocals…", expanded=True) as status2:
+        with st.status("Refining vocals…", expanded=False) as status2:
             cmd_step2 = [
                 "audio-separator",
                 "-m", "UVR-MDX-NET-Inst_HQ_5.onnx",
