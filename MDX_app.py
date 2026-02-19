@@ -22,8 +22,8 @@ if 'current_logs' not in st.session_state:
     st.session_state.current_logs = {}
 
 # ---------------- HELPERS ----------------
-def run_with_logs(cmd, log_box, job_id):
-    """Run subprocess and collect logs without updating UI in loop (prevents crashes)"""
+def run_with_logs(cmd, status_container, job_id):
+    """Run subprocess and stream logs to status container without triggering reruns"""
     try:
         process = subprocess.Popen(
             cmd,
@@ -33,31 +33,47 @@ def run_with_logs(cmd, log_box, job_id):
             bufsize=1
         )
 
-        # Collect all output first, then update UI once
-        stdout, stderr = process.communicate(timeout=PROCESS_TIMEOUT)
+        logs = ""
+        line_count = 0
         
-        logs = stdout if stdout else ""
+        # Read stdout line by line
+        while True:
+            line = process.stdout.readline()
+            if not line:
+                break
+            logs += line
+            line_count += 1
+            
+            # Update status container every 10 lines (shows progress without reruns)
+            if line_count % 10 == 0:
+                status_container.write(f"📝 Processed {line_count} log lines...")
+        
+        # Wait for process to finish
+        returncode = process.wait(timeout=PROCESS_TIMEOUT)
+        
+        # Get any remaining stderr
+        stderr = process.stderr.read() if process.stderr else ""
         if stderr:
             logs += f"\n[STDERR]\n{stderr}"
         
-        # Store in session state instead of re-rendering
+        # Store in session state
         st.session_state.current_logs[job_id] = logs
         
-        # Single UI update at the end
-        log_box.text_area(
-            "Processing log",
-            logs,
-            height=300,
-            disabled=True
-        )
-
-        if process.returncode != 0:
-            raise RuntimeError(f"Processing failed with exit code {process.returncode}\n\n{logs}")
+        # Final status
+        if returncode == 0:
+            status_container.success(f"✅ Completed! ({line_count} log lines)")
+        else:
+            status_container.error(f"❌ Failed with exit code {returncode}")
+            raise RuntimeError(f"Processing failed with exit code {returncode}\n\nLogs:\n{logs}")
+        
+        return logs
             
     except subprocess.TimeoutExpired:
         process.kill()
+        status_container.error("⏱️ Processing timed out")
         raise RuntimeError(f"Processing timed out after {PROCESS_TIMEOUT} seconds")
     except Exception as e:
+        status_container.error(f"❌ Error: {str(e)}")
         raise RuntimeError(f"Error during processing: {str(e)}")
     
 def find_stem(folder, keyword):
@@ -150,22 +166,19 @@ if uploaded and st.button("🎧 Extract Vocals"):
 
         # ---------- STEP 1 ----------
         st.subheader("Step 1 — Extracting vocals")
-        log1 = st.empty()
+        
+        with st.status("Running MDX Main…", expanded=True) as status1:
+            cmd_step1 = [
+                "audio-separator",
+                "-m", "UVR_MDXNET_Main.onnx",
+                "--mdx_segment_size", str(MAIN["seg"]),
+                "--mdx_overlap", str(MAIN["overlap"]),
+                "--output_format", "MP3",
+                "--output_dir", str(step1_dir),
+                str(input_path)
+            ]
 
-        cmd_step1 = [
-            "audio-separator",
-            "-m", "UVR_MDXNET_Main.onnx",
-            "--mdx_segment_size", str(MAIN["seg"]),
-            "--mdx_overlap", str(MAIN["overlap"]),
-            "--output_format", "MP3",
-            "--output_dir", str(step1_dir),
-            str(input_path)
-        ]
-
-        with st.spinner("Running MDX Main…"):
-            run_with_logs(cmd_step1, log1, job_id)
-
-        st.success("Step 1 complete")
+            run_with_logs(cmd_step1, status1, job_id)
 
         vocals_path = find_stem(step1_dir, "Vocals")
         if vocals_path is None:
@@ -174,23 +187,20 @@ if uploaded and st.button("🎧 Extract Vocals"):
 
         # ---------- STEP 2 ----------
         st.subheader("Step 2 — Cleaning vocals")
-        log2 = st.empty()
+        
+        with st.status("Refining vocals…", expanded=True) as status2:
+            cmd_step2 = [
+                "audio-separator",
+                "-m", "UVR-MDX-NET-Inst_HQ_5.onnx",
+                "--single_stem", "Vocals",
+                "--mdx_segment_size", str(HQ["seg"]),
+                "--mdx_overlap", str(HQ["overlap"]),
+                "--output_format", "MP3",
+                "--output_dir", str(step2_dir),
+                str(vocals_path)
+            ]
 
-        cmd_step2 = [
-            "audio-separator",
-            "-m", "UVR-MDX-NET-Inst_HQ_5.onnx",
-            "--single_stem", "Vocals",
-            "--mdx_segment_size", str(HQ["seg"]),
-            "--mdx_overlap", str(HQ["overlap"]),
-            "--output_format", "MP3",
-            "--output_dir", str(step2_dir),
-            str(vocals_path)
-        ]
-
-        with st.spinner("Refining vocals…"):
-            run_with_logs(cmd_step2, log2, job_id)
-
-        st.success("🎉 Final vocals ready!")
+            run_with_logs(cmd_step2, status2, job_id)
 
         # ---------- OUTPUT ----------
         st.subheader("Your extracted vocals")
