@@ -44,9 +44,10 @@ def run_with_logs(cmd, status_container, job_id):
             logs += line
             line_count += 1
             
-            # Update status container every 10 lines (shows progress without reruns)
-            if line_count % 10 == 0:
-                status_container.write(f"📝 Processed {line_count} log lines...")
+            # Update status every 20 lines
+            if line_count % 20 == 0:
+                # Update the last status message
+                status_container.write(f"⏳ Processing... ({line_count} lines executed)")
         
         # Wait for process to finish
         returncode = process.wait(timeout=PROCESS_TIMEOUT)
@@ -59,11 +60,11 @@ def run_with_logs(cmd, status_container, job_id):
         # Store in session state
         st.session_state.current_logs[job_id] = logs
         
-        # Final status
+        # Show completion info
         if returncode == 0:
-            status_container.success(f"✅ Completed! ({line_count} log lines)")
+            status_container.write(f"✅ Step completed! ({line_count} lines processed)")
         else:
-            status_container.error(f"❌ Failed with exit code {returncode}")
+            status_container.write(f"❌ Failed with exit code {returncode}")
             raise RuntimeError(f"Processing failed with exit code {returncode}\n\nLogs:\n{logs}")
         
         return logs
@@ -86,6 +87,14 @@ def find_stem(folder, keyword):
 # ---------------- HEADER ----------------
 st.title("🎤 AI Vocal Separator")
 st.caption("MDX-Net pipeline · High-quality vocal extraction")
+
+# ---------------- SIDEBAR ----------------
+with st.sidebar:
+    st.header("⚙️ Utilities")
+    if st.button("🗑️ Clear all temp files"):
+        shutil.rmtree(TEMP_DIR, ignore_errors=True)
+        TEMP_DIR.mkdir(exist_ok=True)
+        st.success("✅ All temp files cleared!")
 
 # ---------------- ABOUT + EXAMPLE ----------------
 left, right = st.columns([1.4, 1])
@@ -216,18 +225,14 @@ if uploaded and st.button("🎧 Extract Vocals"):
             file_name="vocals.mp3"
         )
         
-        # Cleanup temp files after successful download (user can trigger manually)
-        if st.button("🗑️ Clean up temp files"):
-            try:
-                if input_path.exists():
-                    input_path.unlink()
-                if step1_dir.exists():
-                    shutil.rmtree(step1_dir)
-                if step2_dir.exists():
-                    shutil.rmtree(step2_dir)
-                st.success("Temp files cleaned up!")
-            except Exception as e:
-                st.warning(f"Could not clean up all temp files: {e}")
+        # Auto-cleanup temp files to save disk space
+        st.divider()
+        st.info("🧹 Cleaning up temporary files...")
+        shutil.rmtree(step1_dir, ignore_errors=True)
+        shutil.rmtree(step2_dir, ignore_errors=True)
+        if input_path.exists():
+            input_path.unlink(missing_ok=True)
+        st.success("✅ Temp files cleaned up!")
 
     except RuntimeError as e:
         st.error(f"❌ Processing error: {e}")
