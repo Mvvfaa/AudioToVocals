@@ -84,10 +84,9 @@ st.divider()
 st.subheader("Choose a preset")
 
 preset = st.radio(
-    "Preset",
+    "",
     ["Normal", "Heavy instrumental", "Noisy / live"],
-    horizontal=True,
-    label_visibility="collapsed"
+    horizontal=True
 )
 
 if preset == "Normal":
@@ -98,7 +97,7 @@ if preset == "Normal":
 
 elif preset == "Heavy instrumental":
     st.warning("⏳ Slower — Strong music removal")
-    ETA = "≈ 26 minutes"
+    ETA = "≈ 16 minutes"
     MAIN = {"seg": 768, "overlap": 0.75}
     HQ = {"seg": 256, "overlap": 0.4}
 
