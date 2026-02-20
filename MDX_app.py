@@ -22,10 +22,14 @@ PROCESS_TIMEOUT = 7200
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150MB
 
 # Store processing state in session
-if 'step1_vocals' not in st.session_state:
+if "step1_vocals" not in st.session_state:
     st.session_state.step1_vocals = None
-if 'step1_dirs' not in st.session_state:
+if "step1_dirs" not in st.session_state:
     st.session_state.step1_dirs = {}
+if "show_step1_download" not in st.session_state:
+    st.session_state.show_step1_download = False
+if "proceed_step2" not in st.session_state:
+    st.session_state.proceed_step2 = False
 
 # ---------------- HELPERS ----------------
 def check_file_size(uploaded_file):
@@ -194,6 +198,32 @@ else:
 
 st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
+# Show Step 1 actions if a previous run produced vocals
+if st.session_state.step1_vocals:
+    st.subheader("Step 1 — Ready to Download")
+    st.info("You can download Step 1 vocals now, or continue to Step 2 refinement.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("⬇️ Download Step 1 Vocals", key="download_step1_primary"):
+            st.session_state.show_step1_download = True
+    with col2:
+        if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
+            st.session_state.proceed_step2 = True
+
+    if st.session_state.show_step1_download:
+        step1_path = Path(st.session_state.step1_vocals)
+        if step1_path.exists():
+            st.audio(step1_path.read_bytes(), format="audio/mp3")
+            st.download_button(
+                "⬇ Download Step 1 Vocals",
+                step1_path.read_bytes(),
+                file_name="vocals_step1.mp3",
+                key="download_step1_button"
+            )
+        else:
+            st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
+
 # ---------------- PROCESS ----------------
 st.divider()
 
@@ -232,30 +262,11 @@ if uploaded and st.button("🎧 Extract Vocals"):
         # Save Step 1 results to session state for potential Step 2
         st.session_state.step1_vocals = str(vocals_path)
         st.session_state.step1_dirs = {"step1": str(step1_dir), "step2": str(step2_dir)}
+        st.session_state.show_step1_download = True
 
-        # Show Step 1 completion and offer user choice
-        st.success("✅ Step 1 complete! Vocals extracted.")
-        st.info("💡 You can now download the Step 1 vocals, or optionally proceed to Step 2 for refinement.")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("⬇️ Download Step 1 Vocals"):
-                st.session_state.show_step1_download = True
-        with col2:
-            if st.button("▶️ Continue to Step 2 Refinement"):
-                st.session_state.proceed_step2 = True
-
-        # Show Step 1 download if requested
-        if st.session_state.get("show_step1_download", False):
-            st.audio(vocals_path.read_bytes(), format="audio/mp3")
-            st.download_button(
-                "⬇ Download Step 1 Vocals",
-                vocals_path.read_bytes(),
-                file_name="vocals_step1.mp3"
-            )
-
-        # Skip Step 2 if user doesn't want refinement
-        if not st.session_state.get("proceed_step2", False):
+        # If user hasn't opted into Step 2, stop after Step 1 completes
+        if not st.session_state.proceed_step2:
+            st.success("✅ Step 1 complete! Use the buttons above to download or continue.")
             st.stop()
 
         # ---------- STEP 2 ----------
