@@ -227,10 +227,6 @@ if uploaded and st.button("🎧 Extract Vocals"):
             st.error("❌ Vocals file not found after Step 1. Please try again with a different audio file.")
             st.stop()
 
-        # Clean up Step 1 folder to save disk space BEFORE Step 2 starts
-        st.info("🧹 Cleaning up Step 1 files...")
-        shutil.rmtree(step1_dir, ignore_errors=True)
-
         # ---------- STEP 2 ----------
         st.subheader("Step 2 — Cleaning vocals")
         
