@@ -3,6 +3,7 @@ import subprocess
 import uuid
 import os
 import shutil
+from collections import deque
 from pathlib import Path
 
 # ---------------- CONFIG ----------------
@@ -33,37 +34,46 @@ def check_file_size(uploaded_file):
         raise ValueError(f"File too large: {size_mb:.1f}MB. Maximum: {max_mb:.0f}MB")
 
 def run_with_logs(cmd, status_container, job_id):
-    """Run subprocess with minimal memory usage"""
+    """Run subprocess with minimal memory usage and keep a short log tail"""
     try:
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            universal_newlines=True
         )
 
         line_count = 0
+        log_tail = deque(maxlen=200)
         
         # Read stdout line by line WITHOUT storing in memory
-        while True:
-            line = process.stdout.readline()
+        for line in iter(process.stdout.readline, ''):
             if not line:
                 break
             line_count += 1
+            log_tail.append(line.rstrip())
             
             # Update status container every 50 lines
             if line_count % 50 == 0:
                 status_container.write(f"⏳ Processing... ({line_count} lines)")
         
         # Wait for process to finish
+        process.stdout.close()
         returncode = process.wait(timeout=PROCESS_TIMEOUT)
         
-        # Show completion info
+        # Show completion info (even if 0 lines, step may have succeeded)
         if returncode == 0:
-            status_container.success(f"✅ Complete! ({line_count} lines processed)")
+            if line_count > 0:
+                status_container.success(f"✅ Complete! ({line_count} lines processed)")
+            else:
+                status_container.success("✅ Complete!")
         else:
-            raise RuntimeError(f"Processing failed with exit code {returncode}")
+            tail_text = "\n".join(log_tail) if log_tail else "No logs captured"
+            raise RuntimeError(
+                f"Processing failed with exit code {returncode}\n\nLast log lines:\n{tail_text}"
+            )
         
         return line_count
             
@@ -75,11 +85,27 @@ def run_with_logs(cmd, status_container, job_id):
         status_container.error(f"❌ Error: {str(e)}")
         raise RuntimeError(f"Error during processing: {str(e)}")
     
-def find_stem(folder, keyword):
-    files = list(folder.glob(f"*{keyword}*"))
-    if not files:
+def find_stem(folder, keyword, extensions=None):
+    if not folder.exists():
         return None
-    return files[0]
+    if extensions is None:
+        extensions = {".mp3", ".wav", ".flac", ".m4a", ".ogg"}
+    keyword_lower = keyword.lower()
+    candidates = []
+    for file_path in folder.iterdir():
+        if file_path.is_file() and file_path.suffix.lower() in extensions:
+            if keyword_lower in file_path.name.lower():
+                candidates.append(file_path)
+    if candidates:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    # Fallback: return newest audio file if keyword match failed
+    audio_files = [
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in extensions
+    ]
+    if not audio_files:
+        return None
+    return max(audio_files, key=lambda p: p.stat().st_mtime)
 
 
 # ---------------- HEADER ----------------
@@ -227,6 +253,17 @@ if uploaded and st.button("🎧 Extract Vocals"):
         final_vocals = find_stem(step2_dir, "Vocals")
         if final_vocals is None:
             st.error("❌ Final vocals file not found. Processing may have been interrupted.")
+            # Debug: show what files ARE in the output directory
+            if step2_dir.exists():
+                files_found = list(step2_dir.iterdir())
+                if files_found:
+                    st.warning(f"Debug: Found {len(files_found)} file(s) in output folder:")
+                    for f in files_found:
+                        st.code(f.name)
+                else:
+                    st.warning("Debug: Output folder exists but is empty")
+            else:
+                st.warning("Debug: Output folder does not exist")
             st.stop()
 
         st.audio(final_vocals.read_bytes(), format="audio/mp3")
