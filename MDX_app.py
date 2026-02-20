@@ -21,9 +21,11 @@ PROCESS_TIMEOUT = 7200
 # Max audio file size: 150MB to prevent crashes
 MAX_FILE_SIZE = 150 * 1024 * 1024  # 150MB
 
-# Store only critical info in session (not full logs to save memory)
-if 'processing_status' not in st.session_state:
-    st.session_state.processing_status = {}
+# Store processing state in session
+if 'step1_vocals' not in st.session_state:
+    st.session_state.step1_vocals = None
+if 'step1_dirs' not in st.session_state:
+    st.session_state.step1_dirs = {}
 
 # ---------------- HELPERS ----------------
 def check_file_size(uploaded_file):
@@ -227,6 +229,35 @@ if uploaded and st.button("🎧 Extract Vocals"):
             st.error("❌ Vocals file not found after Step 1. Please try again with a different audio file.")
             st.stop()
 
+        # Save Step 1 results to session state for potential Step 2
+        st.session_state.step1_vocals = str(vocals_path)
+        st.session_state.step1_dirs = {"step1": str(step1_dir), "step2": str(step2_dir)}
+
+        # Show Step 1 completion and offer user choice
+        st.success("✅ Step 1 complete! Vocals extracted.")
+        st.info("💡 You can now download the Step 1 vocals, or optionally proceed to Step 2 for refinement.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("⬇️ Download Step 1 Vocals"):
+                st.session_state.show_step1_download = True
+        with col2:
+            if st.button("▶️ Continue to Step 2 Refinement"):
+                st.session_state.proceed_step2 = True
+
+        # Show Step 1 download if requested
+        if st.session_state.get("show_step1_download", False):
+            st.audio(vocals_path.read_bytes(), format="audio/mp3")
+            st.download_button(
+                "⬇ Download Step 1 Vocals",
+                vocals_path.read_bytes(),
+                file_name="vocals_step1.mp3"
+            )
+
+        # Skip Step 2 if user doesn't want refinement
+        if not st.session_state.get("proceed_step2", False):
+            st.stop()
+
         # ---------- STEP 2 ----------
         st.subheader("Step 2 — Cleaning vocals")
         
@@ -246,29 +277,19 @@ if uploaded and st.button("🎧 Extract Vocals"):
                 run_with_logs(cmd_step2, status2, job_id)
             except RuntimeError as step2_error:
                 # Step 2 failed, but Step 1 output might still be usable
-                st.warning("⚠️ Step 2 refinement failed, attempting to use Step 1 output...")
-                vocals_path = find_stem(step1_dir, "Vocals")
-                if vocals_path is not None:
-                    st.info("✅ Using Step 1 vocals as fallback")
-                else:
-                    raise step2_error
+                st.warning("⚠️ Step 2 refinement failed, using Step 1 output instead...")
+                st.info("✅ Step 1 vocals will be provided as fallback")
 
         # ---------- OUTPUT ----------
         st.subheader("Your extracted vocals")
+        
+        # Try Step 2 first, fallback to Step 1
         final_vocals = find_stem(step2_dir, "Vocals")
         if final_vocals is None:
-            st.error("❌ Final vocals file not found. Processing may have been interrupted.")
-            # Debug: show what files ARE in the output directory
-            if step2_dir.exists():
-                files_found = list(step2_dir.iterdir())
-                if files_found:
-                    st.warning(f"Debug: Found {len(files_found)} file(s) in output folder:")
-                    for f in files_found:
-                        st.code(f.name)
-                else:
-                    st.warning("Debug: Output folder exists but is empty")
-            else:
-                st.warning("Debug: Output folder does not exist")
+            final_vocals = find_stem(step1_dir, "Vocals")
+        
+        if final_vocals is None:
+            st.error("❌ No vocals file found.")
             st.stop()
 
         st.audio(final_vocals.read_bytes(), format="audio/mp3")
