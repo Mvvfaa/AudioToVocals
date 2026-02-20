@@ -182,13 +182,13 @@ elif preset == "Heavy instrumental":
     st.warning("⏳ Slower — Strong music removal")
     ETA = "≈ 16 minutes"
     MAIN = {"seg": 640, "overlap": 0.6}
-    HQ = {"seg": 256, "overlap": 0.3}
+    HQ = {"seg": 192, "overlap": 0.2}
 
 else:
     st.error("🐢 Very Slow — Best for noisy recordings")
     ETA = "≈ 26 minutes"
     MAIN = {"seg": 768, "overlap": 0.7}
-    HQ = {"seg": 256, "overlap": 0.35}
+    HQ = {"seg": 192, "overlap": 0.2}
 
 st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
@@ -242,7 +242,16 @@ if uploaded and st.button("🎧 Extract Vocals"):
                 str(vocals_path)
             ]
 
-            run_with_logs(cmd_step2, status2, job_id)
+            try:
+                run_with_logs(cmd_step2, status2, job_id)
+            except RuntimeError as step2_error:
+                # Step 2 failed, but Step 1 output might still be usable
+                st.warning("⚠️ Step 2 refinement failed, attempting to use Step 1 output...")
+                vocals_path = find_stem(step1_dir, "Vocals")
+                if vocals_path is not None:
+                    st.info("✅ Using Step 1 vocals as fallback")
+                else:
+                    raise step2_error
 
         # ---------- OUTPUT ----------
         st.subheader("Your extracted vocals")
