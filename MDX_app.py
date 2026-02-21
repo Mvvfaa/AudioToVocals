@@ -30,6 +30,10 @@ if "show_step1_download" not in st.session_state:
     st.session_state.show_step1_download = False
 if "proceed_step2" not in st.session_state:
     st.session_state.proceed_step2 = False
+if "step2_done" not in st.session_state:
+    st.session_state.step2_done = False
+if "final_vocals" not in st.session_state:
+    st.session_state.final_vocals = None
 
 # ---------------- HELPERS ----------------
 def check_file_size(uploaded_file):
@@ -203,32 +207,29 @@ if st.session_state.step1_vocals:
     st.subheader("Step 1 — Ready to Download")
     st.info("You can download Step 1 vocals now, or continue to Step 2 refinement.")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("⬇️ Download Step 1 Vocals", key="download_step1_primary"):
-            st.session_state.show_step1_download = True
-    with col2:
-        if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
-            st.session_state.proceed_step2 = True
+    step1_path = Path(st.session_state.step1_vocals)
+    if not step1_path.exists():
+        st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
+    else:
+        st.download_button(
+            "⬇️ Download Step 1 Vocals",
+            step1_path.read_bytes(),
+            file_name=step1_path.name,
+            key="download_step1_primary"
+        )
 
-    if st.session_state.show_step1_download:
-        step1_path = Path(st.session_state.step1_vocals)
-        if step1_path.exists():
-            st.audio(step1_path.read_bytes(), format="audio/mp3")
-            st.download_button(
-                "⬇ Download Step 1 Vocals",
-                step1_path.read_bytes(),
-                file_name="vocals_step1.mp3",
-                key="download_step1_button"
-            )
-        else:
-            st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
+    if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
+        st.session_state.proceed_step2 = True
 
 # ---------------- PROCESS ----------------
 st.divider()
 
 if uploaded and st.button("🎧 Extract Vocals"):
     try:
+        st.session_state.proceed_step2 = False
+        st.session_state.step2_done = False
+        st.session_state.final_vocals = None
+
         job_id = uuid.uuid4().hex[:8]
 
         input_path = TEMP_DIR / f"{job_id}_{uploaded.name}"
@@ -262,16 +263,28 @@ if uploaded and st.button("🎧 Extract Vocals"):
         # Save Step 1 results to session state for potential Step 2
         st.session_state.step1_vocals = str(vocals_path)
         st.session_state.step1_dirs = {"step1": str(step1_dir), "step2": str(step2_dir)}
-        st.session_state.show_step1_download = True
+        st.success("✅ Step 1 complete! Use the controls above to download or continue to Step 2.")
+        st.stop()
 
-        # If user hasn't opted into Step 2, stop after Step 1 completes
-        if not st.session_state.proceed_step2:
-            st.success("✅ Step 1 complete! Use the buttons above to download or continue.")
+    except RuntimeError as e:
+        st.error(f"❌ Processing error: {e}")
+    except Exception as e:
+        st.error(f"❌ Unexpected error: {str(e)}")
+        st.info("Please reload the page and try again.")
+
+# Run Step 2 directly from the Continue button flow (without re-running Step 1)
+if st.session_state.proceed_step2 and st.session_state.step1_vocals and not st.session_state.step2_done:
+    try:
+        step1_path = Path(st.session_state.step1_vocals)
+        step2_dir = Path(st.session_state.step1_dirs.get("step2", TEMP_DIR / f"step2_{uuid.uuid4().hex[:8]}"))
+        step2_dir.mkdir(parents=True, exist_ok=True)
+
+        if not step1_path.exists():
+            st.error("❌ Step 1 vocals file is missing. Please run Step 1 again.")
+            st.session_state.proceed_step2 = False
             st.stop()
 
-        # ---------- STEP 2 ----------
         st.subheader("Step 2 — Cleaning vocals")
-        
         with st.status("Refining vocals…", expanded=False) as status2:
             cmd_step2 = [
                 "audio-separator",
@@ -281,46 +294,37 @@ if uploaded and st.button("🎧 Extract Vocals"):
                 "--mdx_overlap", str(HQ["overlap"]),
                 "--output_format", "MP3",
                 "--output_dir", str(step2_dir),
-                str(vocals_path)
+                str(step1_path)
             ]
 
             try:
-                run_with_logs(cmd_step2, status2, job_id)
-            except RuntimeError as step2_error:
-                # Step 2 failed, but Step 1 output might still be usable
-                st.warning("⚠️ Step 2 refinement failed, using Step 1 output instead...")
-                st.info("✅ Step 1 vocals will be provided as fallback")
+                run_with_logs(cmd_step2, status2, "step2")
+            except RuntimeError:
+                st.warning("⚠️ Step 2 refinement failed, using Step 1 vocals instead.")
 
-        # ---------- OUTPUT ----------
-        st.subheader("Your extracted vocals")
-        
-        # Try Step 2 first, fallback to Step 1
         final_vocals = find_stem(step2_dir, "Vocals")
         if final_vocals is None:
-            final_vocals = find_stem(step1_dir, "Vocals")
-        
-        if final_vocals is None:
-            st.error("❌ No vocals file found.")
-            st.stop()
+            final_vocals = step1_path
 
-        st.audio(final_vocals.read_bytes(), format="audio/mp3")
-        st.download_button(
-            "⬇ Download vocals",
-            final_vocals.read_bytes(),
-            file_name="vocals.mp3"
-        )
-        
-        # Auto-cleanup temp files to save disk space
-        st.divider()
-        st.info("🧹 Cleaning up temporary files...")
-        shutil.rmtree(step1_dir, ignore_errors=True)
-        shutil.rmtree(step2_dir, ignore_errors=True)
-        if input_path.exists():
-            input_path.unlink(missing_ok=True)
-        st.success("✅ Temp files cleaned up!")
+        st.session_state.final_vocals = str(final_vocals)
+        st.session_state.step2_done = True
+        st.session_state.proceed_step2 = False
 
     except RuntimeError as e:
         st.error(f"❌ Processing error: {e}")
+        st.session_state.proceed_step2 = False
     except Exception as e:
         st.error(f"❌ Unexpected error: {str(e)}")
-        st.info("Please reload the page and try again.")
+        st.session_state.proceed_step2 = False
+
+# Render final output if available
+if st.session_state.final_vocals:
+    final_path = Path(st.session_state.final_vocals)
+    if final_path.exists():
+        st.subheader("Your extracted vocals")
+        st.audio(final_path.read_bytes(), format="audio/mp3")
+        st.download_button(
+            "⬇ Download vocals",
+            final_path.read_bytes(),
+            file_name=final_path.name
+        )
