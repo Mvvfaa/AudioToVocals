@@ -264,7 +264,7 @@ if uploaded and st.button("🎧 Extract Vocals"):
         st.session_state.step1_vocals = str(vocals_path)
         st.session_state.step1_dirs = {"step1": str(step1_dir), "step2": str(step2_dir)}
         st.success("✅ Step 1 complete! Use the controls above to download or continue to Step 2.")
-        st.stop()
+        st.rerun()
 
     except RuntimeError as e:
         st.error(f"❌ Processing error: {e}")
