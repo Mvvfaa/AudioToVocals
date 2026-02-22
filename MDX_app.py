@@ -59,6 +59,12 @@ def run_with_logs(cmd, status_container, job_id):
 
         line_count = 0
         log_tail = deque(maxlen=200)
+
+        # Initial status message only (avoid frequent UI mutations on Streamlit Cloud)
+        try:
+            status_container.write("⏳ Processing...")
+        except Exception:
+            pass
         
         if process.stdout is None:
             raise RuntimeError("Failed to capture process output")
@@ -70,13 +76,8 @@ def run_with_logs(cmd, status_container, job_id):
             line_count += 1
             log_tail.append(line.rstrip())
             
-            # Update status header in place every 50 lines (avoid growing UI elements)
-            if line_count % 50 == 0:
-                status_container.update(
-                    label=f"Refining vocals… ({line_count} lines processed)",
-                    state="running",
-                    expanded=False
-                )
+            # Do not update UI repeatedly here; it can crash/restart app on Cloud
+            pass
         
         # Wait for process to finish
         process.stdout.close()
@@ -85,17 +86,15 @@ def run_with_logs(cmd, status_container, job_id):
         # Show completion info (even if 0 lines, step may have succeeded)
         if returncode == 0:
             if line_count > 0:
-                status_container.update(
-                    label=f"✅ Complete! ({line_count} lines processed)",
-                    state="complete",
-                    expanded=False
-                )
+                try:
+                    status_container.write(f"✅ Complete! ({line_count} lines processed)")
+                except Exception:
+                    pass
             else:
-                status_container.update(
-                    label="✅ Complete!",
-                    state="complete",
-                    expanded=False
-                )
+                try:
+                    status_container.write("✅ Complete!")
+                except Exception:
+                    pass
         else:
             tail_text = "\n".join(log_tail) if log_tail else "No logs captured"
             raise RuntimeError(
