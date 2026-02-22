@@ -51,6 +51,8 @@ def run_with_logs(cmd, status_container, job_id):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             universal_newlines=True
         )
@@ -58,6 +60,9 @@ def run_with_logs(cmd, status_container, job_id):
         line_count = 0
         log_tail = deque(maxlen=200)
         
+        if process.stdout is None:
+            raise RuntimeError("Failed to capture process output")
+
         # Read stdout line by line WITHOUT storing in memory
         for line in iter(process.stdout.readline, ''):
             if not line:
@@ -65,9 +70,13 @@ def run_with_logs(cmd, status_container, job_id):
             line_count += 1
             log_tail.append(line.rstrip())
             
-            # Update status container every 50 lines
+            # Update status header in place every 50 lines (avoid growing UI elements)
             if line_count % 50 == 0:
-                status_container.write(f"⏳ Processing... ({line_count} lines)")
+                status_container.update(
+                    label=f"Refining vocals… ({line_count} lines processed)",
+                    state="running",
+                    expanded=False
+                )
         
         # Wait for process to finish
         process.stdout.close()
@@ -76,9 +85,17 @@ def run_with_logs(cmd, status_container, job_id):
         # Show completion info (even if 0 lines, step may have succeeded)
         if returncode == 0:
             if line_count > 0:
-                status_container.success(f"✅ Complete! ({line_count} lines processed)")
+                status_container.update(
+                    label=f"✅ Complete! ({line_count} lines processed)",
+                    state="complete",
+                    expanded=False
+                )
             else:
-                status_container.success("✅ Complete!")
+                status_container.update(
+                    label="✅ Complete!",
+                    state="complete",
+                    expanded=False
+                )
         else:
             tail_text = "\n".join(log_tail) if log_tail else "No logs captured"
             raise RuntimeError(
@@ -202,25 +219,6 @@ else:
 
 st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
-# Show Step 1 actions if a previous run produced vocals
-if st.session_state.step1_vocals:
-    st.subheader("Step 1 — Ready to Download")
-    st.info("You can download Step 1 vocals now, or continue to Step 2 refinement.")
-
-    step1_path = Path(st.session_state.step1_vocals)
-    if not step1_path.exists():
-        st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
-    else:
-        st.download_button(
-            "⬇️ Download Step 1 Vocals",
-            step1_path.read_bytes(),
-            file_name=step1_path.name,
-            key="download_step1_primary"
-        )
-
-    if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
-        st.session_state.proceed_step2 = True
-
 # ---------------- PROCESS ----------------
 st.divider()
 
@@ -271,6 +269,25 @@ if uploaded and st.button("🎧 Extract Vocals"):
     except Exception as e:
         st.error(f"❌ Unexpected error: {str(e)}")
         st.info("Please reload the page and try again.")
+
+# Show Step 1 actions below processing section
+if st.session_state.step1_vocals:
+    st.subheader("Step 1 — Ready to Download")
+    st.info("You can download Step 1 vocals now, or continue to Step 2 refinement.")
+
+    step1_path = Path(st.session_state.step1_vocals)
+    if not step1_path.exists():
+        st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
+    else:
+        st.download_button(
+            "⬇️ Download Step 1 Vocals",
+            step1_path.read_bytes(),
+            file_name=step1_path.name,
+            key="download_step1_primary"
+        )
+
+    if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
+        st.session_state.proceed_step2 = True
 
 # Run Step 2 directly from the Continue button flow (without re-running Step 1)
 if st.session_state.proceed_step2 and st.session_state.step1_vocals and not st.session_state.step2_done:
