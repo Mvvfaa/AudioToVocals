@@ -34,6 +34,8 @@ if "step2_done" not in st.session_state:
     st.session_state.step2_done = False
 if "final_vocals" not in st.session_state:
     st.session_state.final_vocals = None
+if "enable_step2" not in st.session_state:
+    st.session_state.enable_step2 = False
 
 # ---------------- HELPERS ----------------
 def check_file_size(uploaded_file):
@@ -141,6 +143,11 @@ st.caption("MDX-Net pipeline · High-quality vocal extraction")
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
     st.header("⚙️ Utilities")
+    st.session_state.enable_step2 = st.toggle(
+        "Enable Step 2 refinement (high memory)",
+        value=st.session_state.enable_step2,
+        help="Turn on only if your environment can handle heavier processing."
+    )
     if st.button("🗑️ Clear all temp files"):
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
         TEMP_DIR.mkdir(exist_ok=True)
@@ -202,19 +209,19 @@ if preset == "Normal":
     st.success("✅ Best balance — Recommended")
     ETA = "≈ 6 minutes"
     MAIN = {"seg": 512, "overlap": 0.5}
-    HQ = {"seg": 256, "overlap": 0.25}
+    HQ = {"seg": 128, "overlap": 0.1}
 
 elif preset == "Heavy instrumental":
     st.warning("⏳ Slower — Strong music removal")
     ETA = "≈ 16 minutes"
     MAIN = {"seg": 640, "overlap": 0.6}
-    HQ = {"seg": 192, "overlap": 0.2}
+    HQ = {"seg": 128, "overlap": 0.1}
 
 else:
     st.error("🐢 Very Slow — Best for noisy recordings")
     ETA = "≈ 26 minutes"
     MAIN = {"seg": 768, "overlap": 0.7}
-    HQ = {"seg": 192, "overlap": 0.2}
+    HQ = {"seg": 128, "overlap": 0.1}
 
 st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)")
 
@@ -288,7 +295,12 @@ if st.session_state.step1_vocals:
             )
 
     if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
-        st.session_state.proceed_step2 = True
+        if st.session_state.enable_step2:
+            st.session_state.proceed_step2 = True
+        else:
+            st.warning("Step 2 is disabled in Cloud-safe mode. Enable it from the sidebar to proceed.")
+            st.session_state.final_vocals = str(step1_path)
+            st.session_state.step2_done = True
 
 # Run Step 2 directly from the Continue button flow (without re-running Step 1)
 if st.session_state.proceed_step2 and st.session_state.step1_vocals and not st.session_state.step2_done:
