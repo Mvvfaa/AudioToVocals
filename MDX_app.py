@@ -278,12 +278,14 @@ if st.session_state.step1_vocals:
     if not step1_path.exists():
         st.warning("Step 1 vocals file is missing. Please run Step 1 again.")
     else:
-        st.download_button(
-            "⬇️ Download Step 1 Vocals",
-            step1_path.read_bytes(),
-            file_name=step1_path.name,
-            key="download_step1_primary"
-        )
+        with open(step1_path, "rb") as step1_file:
+            st.download_button(
+                "⬇️ Download Step 1 Vocals",
+                data=step1_file,
+                file_name=step1_path.name,
+                mime="audio/mpeg",
+                key="download_step1_primary"
+            )
 
     if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
         st.session_state.proceed_step2 = True
@@ -338,9 +340,11 @@ if st.session_state.final_vocals:
     final_path = Path(st.session_state.final_vocals)
     if final_path.exists():
         st.subheader("Your extracted vocals")
-        st.audio(final_path.read_bytes(), format="audio/mp3")
-        st.download_button(
-            "⬇ Download vocals",
-            final_path.read_bytes(),
-            file_name=final_path.name
-        )
+        st.audio(str(final_path), format="audio/mp3")
+        with open(final_path, "rb") as final_file:
+            st.download_button(
+                "⬇ Download vocals",
+                data=final_file,
+                file_name=final_path.name,
+                mime="audio/mpeg"
+            )
