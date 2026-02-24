@@ -36,6 +36,8 @@ if "final_vocals" not in st.session_state:
     st.session_state.final_vocals = None
 if "enable_step2" not in st.session_state:
     st.session_state.enable_step2 = False
+if "allow_noisy_preset" not in st.session_state:
+    st.session_state.allow_noisy_preset = False
 
 # ---------------- HELPERS ----------------
 def check_file_size(uploaded_file):
@@ -148,6 +150,11 @@ with st.sidebar:
         value=st.session_state.enable_step2,
         help="Turn on only if your environment can handle heavier processing."
     )
+    st.session_state.allow_noisy_preset = st.toggle(
+        "Allow 'Noisy / live' preset (very heavy)",
+        value=st.session_state.allow_noisy_preset,
+        help="This preset can crash on Streamlit Cloud due to memory limits."
+    )
     if st.button("🗑️ Clear all temp files"):
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
         TEMP_DIR.mkdir(exist_ok=True)
@@ -228,7 +235,16 @@ st.caption(f"Estimated processing time: **{ETA}** (depends on CPU & song length)
 # ---------------- PROCESS ----------------
 st.divider()
 
-if uploaded and st.button("🎧 Extract Vocals"):
+noisy_blocked = preset == "Noisy / live" and not st.session_state.allow_noisy_preset
+if noisy_blocked:
+    st.warning("'Noisy / live' is blocked by default to prevent Cloud crashes. Enable it in the sidebar if needed.")
+
+extract_clicked = st.button(
+    "🎧 Extract Vocals",
+    disabled=(uploaded is None) or noisy_blocked
+)
+
+if uploaded and extract_clicked:
     try:
         st.session_state.proceed_step2 = False
         st.session_state.step2_done = False
