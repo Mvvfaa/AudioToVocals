@@ -145,14 +145,14 @@ with col1:
 	)
 	st.page_link("pages/1_MDX.py", label="Open MDX Page", icon="🎤")
 
-with col2:
-	st.markdown(
-		"""
-		<div class="card">
-			<h3>Demucs Pipeline</h3>
-			<p>Model-based stem separation with vocals isolation, fast setup, and consistent quality.</p>
-		</div>
-		""",
-		unsafe_allow_html=True,
-	)
-	st.page_link("pages/2_Demucs.py", label="Open Demucs Page", icon="🎧")
+# with col2:
+# 	st.markdown(
+# 		"""
+# 		<div class="card">
+# 			<h3>Demucs Pipeline</h3>
+# 			<p>Model-based stem separation with vocals isolation, fast setup, and consistent quality.</p>
+# 		</div>
+# 		""",
+# 		unsafe_allow_html=True,
+# 	)
+# 	st.page_link("pages/2_Demucs.py", label="Open Demucs Page", icon="🎧")
