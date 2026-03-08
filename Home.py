@@ -156,3 +156,16 @@ with col1:
 # 		unsafe_allow_html=True,
 # 	)
 # 	st.page_link("pages/2_Demucs.py", label="Open Demucs Page", icon="🎧")
+
+with col2:
+	st.markdown(
+		"""
+		<div class="card">
+			<h3>Demucs Pipeline</h3>
+			<p>Model-based stem separation with vocals isolation, fast setup, and consistent quality.</p>
+			<p style="margin-top:0.75rem;"><span class="chip">Coming Soon</span></p>
+		</div>
+		""",
+		unsafe_allow_html=True,
+	)
+	st.caption("Demucs workflow is in progress and will be available in a future update.")
