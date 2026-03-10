@@ -160,6 +160,16 @@ with st.sidebar:
         TEMP_DIR.mkdir(exist_ok=True)
         st.success("✅ All temp files cleared!")
 
+# If a previous click happened while Step 2 was disabled, unlock Step 2 retry
+# once the user enables it and the current "final" is still just Step 1 output.
+if (
+    st.session_state.enable_step2
+    and st.session_state.step1_vocals
+    and st.session_state.step2_done
+    and st.session_state.final_vocals == st.session_state.step1_vocals
+):
+    st.session_state.step2_done = False
+
 # ---------------- ABOUT + EXAMPLE ----------------
 left, right = st.columns([1.4, 1])
 
@@ -313,13 +323,25 @@ if st.session_state.step1_vocals:
     if st.button("▶️ Continue to Step 2 Refinement", key="continue_step2_primary"):
         if st.session_state.enable_step2:
             st.session_state.proceed_step2 = True
+            st.session_state.step2_done = False
+            st.session_state.final_vocals = None
+            st.rerun()
         else:
-            st.warning("Step 2 is disabled in Cloud-safe mode. Enable it from the sidebar to proceed.")
-            st.session_state.final_vocals = str(step1_path)
-            st.session_state.step2_done = True
+            # Queue Step 2 request so enabling the toggle later will auto-run Step 2.
+            st.session_state.proceed_step2 = True
+            st.session_state.step2_done = False
+            st.info("Step 2 request saved. Enable Step 2 in the sidebar and it will start automatically.")
+
+if st.session_state.proceed_step2 and not st.session_state.enable_step2:
+    st.warning("Step 2 is queued but currently disabled. Turn on 'Enable Step 2 refinement' in the sidebar.")
 
 # Run Step 2 directly from the Continue button flow (without re-running Step 1)
-if st.session_state.proceed_step2 and st.session_state.step1_vocals and not st.session_state.step2_done:
+if (
+    st.session_state.proceed_step2
+    and st.session_state.enable_step2
+    and st.session_state.step1_vocals
+    and not st.session_state.step2_done
+):
     try:
         step1_path = Path(st.session_state.step1_vocals)
         step2_dir = Path(st.session_state.step1_dirs.get("step2", TEMP_DIR / f"step2_{uuid.uuid4().hex[:8]}"))
